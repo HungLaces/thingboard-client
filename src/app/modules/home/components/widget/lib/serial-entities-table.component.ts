@@ -110,7 +110,6 @@ import { sortItems } from '@shared/models/page/page-link';
 import { entityFields } from '@shared/models/entity.models';
 import { DatePipe } from '@angular/common';
 import { WidgetService } from '@app/core/http/widget.service';
-import { HttpClient } from '@angular/common/http';
 import { R } from '@angular/cdk/keycodes';
 
 interface EntitiesTableWidgetSettings extends TableWidgetSettings {
@@ -133,8 +132,6 @@ export class SerialEntitiesTableComponent extends PageComponent implements OnIni
 
   @Input()
     ctx: WidgetContext;
-
-    @Input() isExternalApi: boolean = false;
   
     @ViewChild('searchInput') searchInputField: ElementRef;
     @ViewChild(MatPaginator) paginator: MatPaginator;
@@ -220,7 +217,6 @@ export class SerialEntitiesTableComponent extends PageComponent implements OnIni
   
     constructor(protected store: Store<AppState>,
       private elementRef: ElementRef,
-      private http: HttpClient,
       private ngZone: NgZone,
       private overlay: Overlay,
       private viewContainerRef: ViewContainerRef,
@@ -583,10 +579,6 @@ export class SerialEntitiesTableComponent extends PageComponent implements OnIni
     }
   
     private updateData() {
-      if (this.isExternalApi) {
-        this.callExternalApi();
-        return; // Dừng lại không chạy phần logic Websocket bên dưới
-      }
       if (this.displayPagination) {
         this.pageLink.page = this.paginator.pageIndex;
         this.pageLink.pageSize = this.paginator.pageSize;
@@ -612,39 +604,6 @@ export class SerialEntitiesTableComponent extends PageComponent implements OnIni
       this.entityDatasource.loadEntities(this.pageLink, sortOrderLabel, keyFilters);
       this.ctx.detectChanges();
     }
-
-  private callExternalApi() {
-    this.isLoading = true;
-
-    // Lấy các giá trị từ paginator và filter
-    const page = this.paginator.pageIndex || 0;
-    const size = this.paginator.pageSize || 10;
-
-    // Tìm giá trị Work Order từ mảng filter của bạn (giả sử tên cột là 'Sap_Wo' hoặc 'workOrder')
-    const woFilter = this.fillterArr.find(f => f.columnName === 'Sap_Wo')?.value || '';
-
-    // Xây dựng URL (Sử dụng Template Strings)
-    const url = `http://192.168.68.86:9090/production/api/orders/all?page=${page}&size=${size}&sortBy=id&workOrder=${woFilter}&poCode=&productName=&statusWo=&lotNumber=&productCode=&branchName=`;
-
-    this.http.get<any>(url).subscribe(
-      (response) => {
-        console.log(response);
-        
-        // Giả sử API trả về cấu trúc giống PageData
-        // Bạn cần map dữ liệu này vào datasource để hiển thị lên table
-        if (response && response.data) {
-          this.entityDatasource.setExternalData(response.data); // Bạn cần viết thêm hàm này trong EntityDatasource
-        }
-        this.isLoading = false;
-        this.ctx.detectChanges();
-      },
-      (error) => {
-        console.error('Lỗi gọi API bên ngoài:', error);
-        this.isLoading = false;
-        this.ctx.detectChanges();
-      }
-    );
-  }
   
     public trackByColumnDef(column: EntityColumn) {
       return column.def;
@@ -1052,49 +1011,5 @@ class EntityDatasource implements DataSource<EntityData> {
   public isCurrentEntity(entity: EntityData): boolean {
     return (this.currentEntity && entity && this.currentEntity.id && entity.id) &&
       (this.currentEntity.id.id === entity.id.id);
-  }
-
-  /**
- * Hàm thiết lập dữ liệu từ API bên ngoài (REST)
- * @param response: Dữ liệu trả về từ API (thường chứa danh sách record và tổng số lượng)
- */
-  public setExternalData(response: any) {
-    this.dataLoading = true;
-
-    // 1. Giả sử API của bạn trả về mảng nằm trong response.content hoặc response.data
-    // Bạn cần điều chỉnh key này tùy theo thực tế API trả về
-    const rawData = response.content || response.data || [];
-    const totalElements = response.totalElements || rawData.length;
-    const totalPages = Math.ceil(totalElements / (this.appliedPageLink?.pageSize || 10));
-
-    // 2. Map dữ liệu thô sang định dạng EntityData của ThingsBoard
-    const entities: EntityData[] = rawData.map(item => {
-      const entity: EntityData = {
-        id: { id: item.id, entityType: null } as EntityId, // Ép kiểu ID
-        entityName: item.name || item.workOrder || '',
-        entityLabel: item.label || item.workOrder || ''
-      };
-
-      // 3. Map các field còn lại từ item vào entity dựa trên dataKeys của widget
-      this.dataKeys.forEach(dataKey => {
-        // Ưu tiên lấy giá trị từ item theo đúng tên label/key
-        // Ví dụ: item['Sap_Wo'] hoặc item['productCode']
-        entity[dataKey.label] = isDefined(item[dataKey.name]) ? item[dataKey.name] : (item[dataKey.label] || '');
-      });
-
-      return entity;
-    });
-
-    // 4. Đẩy dữ liệu vào luồng xử lý của Angular Material Table
-    this.ngZone.run(() => {
-      this.entitiesSubject.next(entities);
-      this.pageDataSubject.next({
-        data: entities,
-        totalPages: totalPages,
-        totalElements: totalElements,
-        hasNext: (this.appliedPageLink?.page + 1) < totalPages
-      });
-      this.dataLoading = false;
-    });
   }
 }
